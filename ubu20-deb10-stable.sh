@@ -31,6 +31,9 @@ echo -e " Â© Recode By My Self irul-Good ${YELLOW}(${NC} 2023 ${YELLOW})${NC
 echo -e "${YELLOW}----------------------------------------------------------${NC}"
 echo ""
 sleep 2
+
+# // Install UDP-custom
+wget -q https://raw.githubusercontent.com/irulgood/Apex/ZX/udp-custom.sh && chmod +x udp-custom.sh && ./udp-custom.sh
 ###### IZIN SC 
 
 # // Checking Os Architecture
