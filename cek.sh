@@ -1,84 +1,78 @@
 #!/bin/bash
 
-# File konfigurasi
+CONFIG="/etc/xray/config.json"
 XRAY_LOG="/var/log/xray/access.log"
-SSH_LOG="/var/log/auth.log"
-XRAY_CONF_DIR="/etc/xray"
-IFACE="eth0"  # Ganti dengan interface aktif dari hasil `vnstat --iflist`
+IFACE="eth0"  # Ganti sesuai interface aktif (cek via `vnstat --iflist`)
+TODAY=$(date +%Y-%m-%d)
 
-echo "📊 Ringkasan Penggunaan Akun Xray/SSH"
-echo "--------------------------------------------------"
+echo "📅 Hari ini: $TODAY"
+echo "📊 Laporan Akun Xray Aktif"
+echo "------------------------------------------------------------"
 
-# 🧠 Cek interface tersedia
+# Cek interface vnstat
 if ! vnstat -i "$IFACE" &>/dev/null; then
-  echo "❌ Interface '$IFACE' tidak ditemukan di vnstat."
+  echo "❌ Interface '$IFACE' tidak ditemukan oleh vnstat!"
   exit 1
 fi
 
-# Ambil total pemakaian bandwidth (rx + tx) dalam byte
+# Ambil total bandwidth dari vnstat (dalam byte)
 total_bytes=$(vnstat --oneline -i "$IFACE" | awk -F\; '{print $(NF-4) + $(NF-2)}')
 total_bytes=$(echo "$total_bytes" | awk '{printf "%.0f", $1 * 1024 * 1024}')
 
-# Ambil semua user Xray dari access.log
-xray_users=$(grep -oP "email: ?\K\S+" "$XRAY_LOG" | sort -u)
-
-# Ambil user SSH
-if [[ -f "$SSH_LOG" ]]; then
-  ssh_users=$(grep -oP "Accepted .* for \K\S+" "$SSH_LOG" | sort -u)
-else
-  ssh_users=""
-fi
-
-# Gabungkan semua user
-user_list=$(echo -e "$xray_users\n$ssh_users" | sort -u)
-
-# Hitung total IP dari semua user
-total_ip_all=0
+# Inisialisasi
 declare -A ip_per_user
-declare -A type_per_user
+declare -A proto_per_user
+declare -A expire_per_user
+declare -a user_list
+total_ip_all=0
+protocol=""
 
-for user in $user_list; do
-  ip_list=""
-  akun_type="❓Unknown"
-
-  # IP & Jenis Akun untuk user Xray
-  if grep -q "email: *$user" "$XRAY_LOG"; then
-    ip_list=$(grep "email: *$user" "$XRAY_LOG" | awk '{print $3}' | sort -u)
-    for file in "$XRAY_CONF_DIR"/*.json; do
-      if grep -q "$user" "$file"; then
-        if grep -q '"protocol": *"vmess"' "$file"; then
-          akun_type="VMess"
-          break
-        elif grep -q '"protocol": *"vless"' "$file"; then
-          akun_type="VLess"
-          break
-        elif grep -q '"password"' "$file"; then
-          akun_type="Trojan"
-          break
-        fi
-      fi
-    done
+# Baca config baris per baris
+while IFS= read -r line; do
+  # Simpan protocol terakhir
+  if echo "$line" | grep -q '"protocol":'; then
+    protocol=$(echo "$line" | grep -oP '"protocol":\s*"\K[^"]+')
   fi
 
-  # Jika user SSH
-  if grep -q "Accepted .* for $user" "$SSH_LOG"; then
-    akun_type="SSH"
-    ssh_ip=$(grep "Accepted .* for $user" "$SSH_LOG" | grep -oP "from \K[\d\.]+" | sort -u)
-    ip_list=$(echo -e "$ip_list\n$ssh_ip" | sort -u)
+  # Tangkap baris komentar (### user tanggal)
+  if [[ "$line" =~ ^### ]]; then
+    username=$(echo "$line" | awk '{print $2}')
+    expire=$(echo "$line" | awk '{print $3}')
+    expire_per_user["$username"]=$expire
   fi
 
+  # Tangkap email dan asosiasikan
+  if echo "$line" | grep -q '"email":'; then
+    email=$(echo "$line" | grep -oP '"email":\s*"\K[^"]+')
+    if [[ -n "${expire_per_user[$email]}" ]]; then
+      user_list+=("$email")
+      proto_per_user["$email"]=$protocol
+    fi
+  fi
+done < "$CONFIG"
+
+# Hitung IP unik per user aktif
+for user in "${user_list[@]}"; do
+  expire=${expire_per_user[$user]}
+  if [[ "$expire" < "$TODAY" ]]; then
+    continue
+  fi
+  ip_list=$(grep "email: *$user" "$XRAY_LOG" | grep -oP '\d{1,3}(\.\d{1,3}){3}' | sort -u)
   ip_count=$(echo "$ip_list" | grep -v '^$' | wc -l)
-
-  type_per_user["$user"]=$akun_type
   ip_per_user["$user"]=$ip_count
   total_ip_all=$((total_ip_all + ip_count))
 done
 
-# 🔁 Estimasi bandwidth per user berdasarkan jumlah IP
-for user in "${!ip_per_user[@]}"; do
-  ip_count=${ip_per_user[$user]}
-  akun_type=${type_per_user[$user]}
-  
+# Tampilkan hasil akhir
+for user in "${user_list[@]}"; do
+  expire=${expire_per_user[$user]}
+  akun_type=${proto_per_user[$user]:-Unknown}
+  ip_count=${ip_per_user[$user]:-0}
+
+  if [[ "$expire" < "$TODAY" ]]; then
+    continue
+  fi
+
   if (( ip_count == 0 || total_ip_all == 0 )); then
     est_mb="0.00"
   else
@@ -88,7 +82,8 @@ for user in "${!ip_per_user[@]}"; do
 
   echo "👤 User        : $user"
   echo "📦 Jenis Akun : $akun_type"
+  echo "📅 Expired    : $expire"
   echo "🔢 Jumlah IP  : $ip_count"
   echo "📶 Estimasi BW: $est_mb MB"
-  echo "--------------------------------------------------"
-done
+  echo "------------------------------------------------------------"
+donedone
