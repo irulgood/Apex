@@ -1,35 +1,31 @@
 #!/bin/bash
-
 set -e
 
-echo "🚨 PERINGATAN BESAR: Ini akan MENGHAPUS sistem lama dan menggantinya dengan Ubuntu 20.04."
-read -p "Apakah kamu yakin ingin LANJUT? (y/N): " confirm
-if [[ "$confirm" != "y" ]]; then
-  echo "❌ Proses dibatalkan."
-  exit 1
-fi
+echo "⚠️ PERINGATAN: Ini akan mengganti Ubuntu 22.04 jadi 20.04 dan bisa merusak sistem jika gagal."
+read -p "Lanjut downgrade ke Ubuntu 20.04? (y/N): " confirm
+[[ "$confirm" != "y" ]] && echo "❌ Batal" && exit 1
 
-echo "🔍 Mendeteksi disk utama..."
-ROOT_DISK=$(lsblk -n -o NAME,MOUNTPOINT | grep " /$" | awk '{print $1}' | sed 's/[0-9]*$//')
-DISK_DEV="/dev/${ROOT_DISK}"
-echo "📦 Disk utama terdeteksi: $DISK_DEV"
+echo "🔧 Mengubah repo sources.list ke focal (20.04)..."
+sudo sed -i 's/jammy/focal/g; s/kinetic/focal/g; s/lunar/focal/g' /etc/apt/sources.list
 
-echo "🔧 Memasang dependensi..."
-apt update
-apt install -y debootstrap gdisk grub-pc net-tools ifupdown systemd-sysv sudo
+echo "🔄 Update repo dan install aptitude..."
+sudo apt update
+sudo apt install -y aptitude
 
-echo "📁 Membuat sistem Ubuntu 20.04 di /mnt/ubuntu20..."
-mkdir -p /mnt/ubuntu20
-debootstrap focal /mnt/ubuntu20 http://archive.ubuntu.com/ubuntu
+echo "📦 Melakukan full-upgrade dengan aptitude (interaktif)..."
+sudo aptitude full-upgrade || true
 
-echo "🔗 Mount virtual filesystem..."
-mount --bind /dev /mnt/ubuntu20/dev
-mount --bind /proc /mnt/ubuntu20/proc
-mount --bind /sys /mnt/ubuntu20/sys
-cp /etc/resolv.conf /mnt/ubuntu20/etc/
+echo "🛠️ Memperbaiki konflik file yang overwrite (E: Tried to extract...)"
+sudo apt -o Dpkg::Options::="--force-overwrite" -f install
 
-echo "🌐 Menyiapkan konfigurasi jaringan statik..."
-cat > /mnt/ubuntu20/etc/network/interfaces <<EOF
+echo "🧩 Menginstal kernel Ubuntu 20.04 (opsional, stabil)..."
+sudo apt install -y linux-image-5.15.0-144-generic linux-headers-5.15.0-144-generic
+
+echo "📂 Pastikan folder konfigurasi jaringan ada..."
+sudo mkdir -p /etc/network
+
+echo "🌐 Setup konfigurasi jaringan DHCP..."
+sudo tee /etc/network/interfaces >/dev/null <<EOF
 auto lo
 iface lo inet loopback
 
@@ -37,25 +33,9 @@ auto eth0
 iface eth0 inet dhcp
 EOF
 
-echo "🔧 Masuk ke sistem Ubuntu 20.04 (chroot) dan instalasi sistem..."
-chroot /mnt/ubuntu20 /bin/bash <<'EOL'
-echo "ubuntu20" > /etc/hostname
-apt update
-apt install -y ssh sudo net-tools ifupdown grub-pc systemd-sysv
+echo "🔁 Update GRUB bootloader..."
+sudo update-grub
 
-echo "🔑 Silakan atur password root baru:"
-passwd root
-
-echo "📦 Memasang GRUB ke disk utama..."
-grub-install /dev/vda
-update-grub
-EOL
-
-echo "✅ Sistem Ubuntu 20.04 berhasil dipasang."
-
-echo "🧨 Menghapus sistem lama (pastikan semua sukses sebelumnya)..."
-umount -l /mnt/ubuntu20/dev /mnt/ubuntu20/proc /mnt/ubuntu20/sys
-rm -rf /* --preserve-root
-
-echo "🔁 Rebooting ke sistem Ubuntu 20.04 baru..."
-reboot
+echo "✅ Downgrade selesai. Kamu bisa reboot sekarang."
+read -p "Reboot sekarang? (y/N): " reboot_now
+[[ "$reboot_now" == "y" ]] && sudo reboot || echo "🚨 Silakan reboot manual nanti untuk menyelesaikan downgrade."
