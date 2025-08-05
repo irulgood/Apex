@@ -1,33 +1,39 @@
 #!/bin/bash
 set -e
 
-echo "⚠️ PERINGATAN: Ini akan men-downgrade VPS dari Ubuntu 22.04 ke 20.04"
-read -p "Lanjutkan downgrade? (y/N): " confirm
+echo "🚨 PERINGATAN: INI AKAN MENGGANTI OS VPS KAMU DENGAN UBUNTU 20.04 BARU!"
+echo "Seluruh data lama akan hilang! Pastikan sudah backup."
+read -p "Lanjutkan debootstrap install Ubuntu 20.04? (y/N): " confirm
 [[ "$confirm" != "y" ]] && echo "❌ Dibatalkan" && exit 1
 
-# Ganti repo ke focal (Ubuntu 20.04)
-echo "🔧 Mengganti /etc/apt/sources.list ke focal..."
-sudo sed -i 's/jammy/focal/g; s/kinetic/focal/g; s/lunar/focal/g' /etc/apt/sources.list
+DISK_DEV="/dev/vda"  # Ganti sesuai output lsblk (biasanya /dev/vda untuk DO, kadang /dev/sda di provider lain)
 
-echo "🔄 Menjalankan apt update..."
-sudo apt update
-echo "📦 Menginstall aptitude..."
-sudo apt install -y aptitude
+echo "🔧 Memasang tools penting..."
+apt update
+apt install -y debootstrap gdisk grub-pc net-tools ifupdown systemd-sysv sudo
 
-echo "📉 Menjalankan full-upgrade untuk downgrade (aptitude)..."
-sudo aptitude full-upgrade || true
+echo "📁 Membuat sistem Ubuntu 20.04 baru di /mnt/ubuntu20..."
+mkdir -p /mnt/ubuntu20
+debootstrap focal /mnt/ubuntu20 http://archive.ubuntu.com/ubuntu
 
-echo "🧩 Memperbaiki konflik overwrite file (E: Tried to extract package...)"
-sudo apt -o Dpkg::Options::="--force-overwrite" -f install
+echo "🔗 Mount filesystem agar chroot bekerja..."
+mount --bind /dev /mnt/ubuntu20/dev
+mount --bind /proc /mnt/ubuntu20/proc
+mount --bind /sys /mnt/ubuntu20/sys
+cp /etc/resolv.conf /mnt/ubuntu20/etc/
 
-echo "🧠 Menginstall kernel Ubuntu 20.04 (5.15.0-144)..."
-sudo apt install -y linux-image-5.15.0-144-generic linux-headers-5.15.0-144-generic
+echo "🌐 Setting konfigurasi jaringan dan SSH di sistem baru..."
+chroot /mnt/ubuntu20 /bin/bash <<'EOL'
+echo "ubuntu20" > /etc/hostname
+apt update
+apt install -y ssh grub-pc sudo net-tools ifupdown systemd-sysv
 
-echo "📂 Membuat /etc/network kalau belum ada..."
-sudo mkdir -p /etc/network
+# Atur password root (otomatis: root123, GANTI SETELAH LOGIN!)
+echo "root:@Irul21tun" | chpasswd
 
-echo "🌐 Menulis konfigurasi DHCP ke /etc/network/interfaces..."
-sudo tee /etc/network/interfaces > /dev/null <<EOF
+# Siapkan interfaces DHCP agar jaringan langsung hidup
+mkdir -p /etc/network
+cat > /etc/network/interfaces <<EOF
 auto lo
 iface lo inet loopback
 
@@ -35,9 +41,17 @@ auto eth0
 iface eth0 inet dhcp
 EOF
 
-echo "🔁 Update GRUB..."
-sudo update-grub
+grub-install /dev/vda  # Ganti ke /dev/sda jika disk utama kamu /dev/sda
+update-grub
+EOL
 
-echo "✅ Downgrade selesai. Ubuntu kamu sekarang sudah berbasis repositori 20.04 (focal)"
-read -p "Mau reboot sekarang? (y/N): " reboot
-[[ "$reboot" == "y" ]] && sudo reboot || echo "❗ Silakan reboot manual nanti untuk menerapkan semua perubahan."
+echo "✅ Sistem Ubuntu 20.04 sudah terinstall di /mnt/ubuntu20."
+
+echo "🧨 Menghapus seluruh sistem lama dari root / (PERMANEN, TIDAK BISA DIUNDO!)"
+echo "   Tunggu 10 detik jika kamu mau cancel (Ctrl+C untuk batal)..."
+sleep 10
+umount -l /mnt/ubuntu20/dev /mnt/ubuntu20/proc /mnt/ubuntu20/sys
+rm -rf /* --preserve-root
+
+echo "🔁 Rebooting ke Ubuntu 20.04 baru..."
+reboot
