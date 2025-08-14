@@ -1,90 +1,97 @@
 #!/bin/bash
 
-CONFIG="/etc/xray/config.json"
+# === Konfigurasi umum ===
 XRAY_LOG="/var/log/xray/access.log"
-IFACE="eth0"  # Ganti sesuai interface aktif (cek dengan: vnstat --iflist)
-TODAY=$(date +%Y-%m-%d)
+WINDOW_MIN=15          # jendela waktu "aktif": 15 menit terakhir
+SHOW_IP_LIST=true      # true: tampilkan daftar IP aktif; false: hanya jumlahnya
+HIDE_EXPIRED=true      # true: sembunyikan user yang sudah lewat tanggal expire
 
-echo "📅 Hari ini: $TODAY"
-echo "📊 Laporan Akun Xray Aktif"
-echo "------------------------------------------------------------"
+# === Inisialisasi waktu ===
+TODAY=$(date +%F)
+CUTOFF=$(date -d "-${WINDOW_MIN} minutes" +%s)
 
-# Cek interface vnstat
-if ! vnstat -i "$IFACE" &>/dev/null; then
-  echo "❌ Interface '$IFACE' tidak ditemukan oleh vnstat!"
-  exit 1
-fi
+# === Fungsi: ambil IP AKTIF untuk user tertentu dalam WINDOW_MIN menit terakhir ===
+active_ips_for_user() {
+  local user="$1"
+  # Ambil IP yang tercatat untuk "email: user" dalam access.log,
+  # hanya jika timestamp baris >= CUTOFF
+  awk -v user="$user" -v cutoff="$CUTOFF" '
+    # Contoh baris log:
+    # 2025/08/01 12:45:01 203.0.113.10 accepted tcp:... email:risky
+    $0 ~ ("email:[[:space:]]*" user) {
+      date=$1; time=$2
+      # Pastikan format tanggal & waktu valid
+      if (date ~ /^[0-9]{4}\/[0-9]{2}\/[0-9]{2}$/ && time ~ /^[0-9]{2}:[0-9]{2}:[0-9]{2}$/) {
+        cmd = "date -d \"" date " " time "\" +%s"
+        cmd | getline ts
+        close(cmd)
+        if (ts >= cutoff) {
+          if (match($0, /([0-9]{1,3}\.){3}[0-9]{1,3}/, m)) ips[m[0]]=1
+        }
+      }
+    }
+    END { for (i in ips) print i }
+  ' "$XRAY_LOG"
+}
 
-# Ambil total bandwidth dari vnstat (dalam byte)
-total_bytes=$(vnstat --oneline -i "$IFACE" | awk -F\; '{print $(NF-4) + $(NF-2)}')
-total_bytes=$(echo "$total_bytes" | awk '{printf "%.0f", $1 * 1024 * 1024}')
+echo "📊 Laporan Akun Xray (IP AKTIF dalam ${WINDOW_MIN} menit terakhir)"
+echo "=================================================================="
 
-declare -A ip_per_user
-declare -A proto_per_user
-declare -A expire_per_user
-declare -a user_list
-total_ip_all=0
-protocol=""
-last_user=""
-last_expire=""
+# === Daftar protokol yang dicek ===
+for proto in vmess vless trojan shadowsocks; do
+  DB_PATH="/etc/${proto}/.${proto}.db"
+  LIMIT_FILE_BASE="/etc/limit/${proto}/quota"
 
-while IFS= read -r line; do
-  # Ambil protokol terakhir
-  if echo "$line" | grep -q '"protocol":'; then
-    protocol=$(echo "$line" | grep -oP '"protocol":\s*"\K[^"]+')
+  if [[ ! -f "$DB_PATH" ]]; then
+    echo "❌ Database tidak ditemukan: $DB_PATH"
+    echo "------------------------------------------------------------------"
+    continue
   fi
 
-  # Tangkap komentar ### user tanggal
-  if [[ "$line" =~ ^### ]]; then
-    last_user=$(echo "$line" | awk '{print $2}')
-    last_expire=$(echo "$line" | awk '{print $3}')
-    expire_per_user["$last_user"]=$last_expire
-  fi
+  echo "🔹 Jenis Akun: ${proto^^}"
 
-  # Tangkap email, cocokkan dengan user dari komentar sebelumnya
-  if echo "$line" | grep -q '"email":'; then
-    email=$(echo "$line" | grep -oP '"email":\s*"\K[^"]+')
-    if [[ "$email" == "$last_user" ]]; then
-      user_list+=("$email")
-      proto_per_user["$email"]=$protocol
+  # Format: "### <user> <expire> <uuid> <used_bytes>"
+  grep -a "^###" "$DB_PATH" | while read -r tag user expire uuid used; do
+    # Filter expired jika diinginkan
+    if [[ "$HIDE_EXPIRED" == "true" && "$expire" < "$TODAY" ]]; then
+      continue
     fi
-  fi
-done < "$CONFIG"
 
-# Hitung IP unik untuk user aktif
-for user in "${user_list[@]}"; do
-  expire=${expire_per_user[$user]}
-  if [[ "$expire" < "$TODAY" ]]; then
-    continue
-  fi
+    # Normalisasi 'used'
+    [[ "$used" =~ ^[0-9]+$ ]] || used=0
+    used_gb=$(awk "BEGIN {printf \"%.2f\", $used / 1024 / 1024 / 1024}")
 
-  ip_list=$(grep "email: *$user" "$XRAY_LOG" | grep -oP '\d{1,3}(\.\d{1,3}){3}' | sort -u)
-  ip_count=$(echo "$ip_list" | grep -v '^$' | wc -l)
-  ip_per_user["$user"]=$ip_count
-  total_ip_all=$((total_ip_all + ip_count))
-done
+    # Ambil IP aktif
+    active_ips="$(active_ips_for_user "$user")"
+    ip_count=$(printf "%s\n" "$active_ips" | grep -v '^[[:space:]]*$' | wc -l)
 
-# Tampilkan laporan akhir
-for user in "${user_list[@]}"; do
-  expire=${expire_per_user[$user]}
-  if [[ "$expire" < "$TODAY" ]]; then
-    continue
-  fi
+    # (Opsional) Sisa kuota jika file ada
+    quota_file="${LIMIT_FILE_BASE}/${user}"
+    if [[ -f "$quota_file" ]]; then
+      quota_byte=$(cat "$quota_file")
+      quota_gb=$(awk "BEGIN {printf \"%.2f\", $quota_byte / 1024 / 1024 / 1024}")
+      quota_status="✅"
+    else
+      quota_gb="0.00"
+      quota_status="❌"
+    fi
 
-  ip_count=${ip_per_user[$user]:-0}
-  akun_type=${proto_per_user[$user]:-Unknown}
-
-  if (( ip_count == 0 || total_ip_all == 0 )); then
-    est_mb="0.00"
-  else
-    user_bytes=$((total_bytes * ip_count / total_ip_all))
-    est_mb=$(awk "BEGIN {printf \"%.2f\", $user_bytes / 1024 / 1024}")
-  fi
-
-  echo "👤 User        : $user"
-  echo "📦 Jenis Akun : $akun_type"
-  echo "📅 Expired    : $expire"
-  echo "🔢 Jumlah IP  : $ip_count"
-  echo "📶 Estimasi BW: $est_mb MB"
-  echo "------------------------------------------------------------"
+    # Output
+    echo "👤 User        : $user"
+    echo "📦 Jenis Akun : $proto"
+    echo "📅 Expired    : $expire"
+    echo "📊 Dipakai    : $used_gb GB"
+    echo "💾 Kuota Sisa : $quota_gb GB ($quota_status)"
+    echo "🔢 IP Aktif   : $ip_count"
+    if [[ "$SHOW_IP_LIST" == "true" ]]; then
+      if [[ "$ip_count" -gt 0 ]]; then
+        # tampilkan IP aktif dalam satu baris, dipisah spasi
+        one_line_ips=$(echo "$active_ips" | xargs echo)
+        echo "🌐 Daftar IP   : $one_line_ips"
+      else
+        echo "🌐 Daftar IP   : -"
+      fi
+    fi
+    echo "------------------------------------------------------------------"
+  done
 done
