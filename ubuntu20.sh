@@ -53,25 +53,40 @@ linux-image-generic-hwe-20.04 initramfs-tools \
 grub-pc grub-common openssh-server sudo net-tools systemd-sysv netplan.io
 echo "ubuntu20" > /etc/hostname
 
-SSH root+password
 
-sed -i 's/^#?PermitRootLogin./PermitRootLogin yes/' /etc/ssh/sshd_config || true
-sed -i 's/^#?PasswordAuthentication./PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+# SSH root+password (regex diperbaiki)
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
 echo 'UsePAM yes' >> /etc/ssh/sshd_config
 ssh-keygen -A
 echo "root:@Irul21tun" | chpasswd
 
-Netplan DHCP (eth0/ens3)
-
+# Netplan DHCP (match semua "e*": eth0/ens3/enp*)
 mkdir -p /etc/netplan
-cat >/etc/netplan/01-netcfg.yaml <<EOF
+cat >/etc/netplan/01-netcfg.yaml <<'YAML'
 network:
-version: 2
-renderer: networkd
-ethernets:
-eth0: { dhcp4: true, optional: true }
-ens3: { dhcp4: true, optional: true }
-EOF
+  version: 2
+  renderer: networkd
+  ethernets:
+    default:
+      match:
+        name: "e*"
+      dhcp4: true
+      optional: true
+YAML
+
+# Enable networkd/resolved/ssh secara offline (symlink)
+ln -sf /lib/systemd/system/systemd-networkd.service \
+      /etc/systemd/system/multi-user.target.wants/systemd-networkd.service
+ln -sf /lib/systemd/system/systemd-resolved.service \
+      /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
+ln -sf /lib/systemd/system/ssh.service \
+      /etc/systemd/system/multi-user.target.wants/ssh.service
+
+# resolv.conf via resolved; fallback DNS statik bila stub belum ada
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || \
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+
 
 hosts & fstab
 
@@ -129,3 +144,4 @@ sync
 umount -l /mnt/ubuntu20/dev /mnt/ubuntu20/proc /mnt/ubuntu20/sys || true
 echo "🔁 Reboot ke Ubuntu 20.04 baru…"
 reboot
+
