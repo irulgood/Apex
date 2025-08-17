@@ -1,4 +1,3 @@
-cat >/root/downgrade-onepass.sh <<'SH'
 #!/bin/bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -301,5 +300,5 @@ fi
 sync
 umount -l /mnt/ubuntu20/dev /mnt/ubuntu20/proc /mnt/ubuntu20/sys || true
 echo "🔁 Reboot ke Ubuntu 20.04 baru…"
-reboot
-SH
+rebootg
+
