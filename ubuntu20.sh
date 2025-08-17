@@ -43,11 +43,7 @@ apt-get install -y debootstrap gdisk wget gpgv gnupg2 ca-certificates rsync
 
 echo "📁 Bootstrap focal ke /mnt/ubuntu20…"
 mkdir -p /mnt/ubuntu20
-if [[ ! -x /mnt/ubuntu20/bin/sh ]]; then
-  debootstrap focal /mnt/ubuntu20 http://archive.ubuntu.com/ubuntu
-else
-  echo "ℹ️  /mnt/ubuntu20 sudah ada — lewati debootstrap."
-fi
+[[ -x /mnt/ubuntu20/bin/sh ]] || debootstrap focal /mnt/ubuntu20 http://archive.ubuntu.com/ubuntu
 
 echo "🔗 Bind-mount chroot…"
 mountpoint -q /mnt/ubuntu20/dev  || mount --bind /dev  /mnt/ubuntu20/dev
@@ -61,7 +57,14 @@ export DISK_DEV ROOT_UUID FSTYPE
 chroot /mnt/ubuntu20 /bin/bash -eux <<'CHROOT'
 export DEBIAN_FRONTEND=noninteractive
 
-# Pastikan index OK
+# === Tulis sources.list LENGKAP (main+restricted+universe+multiverse) ===
+cat >/etc/apt/sources.list <<EOF
+deb http://archive.ubuntu.com/ubuntu focal main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu focal-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu focal-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu focal-security main restricted universe multiverse
+EOF
+
 apt-get update
 
 # Paket dasar OS (pakai force-overwrite utk cegah konflik file)
@@ -107,31 +110,30 @@ cat >/etc/fstab <<EOF
 UUID=${ROOT_UUID} / ${FSTYPE} defaults,errors=remount-ro 0 1
 EOF
 
-# Direktori & perms yang sering bikin installer error
+# Direktori & perms untuk Xray / installer lain
 chmod 1777 /tmp /var/tmp || true
 install -d -m 755 /usr/local/bin /usr/local/etc /usr/local/etc/xray /usr/local/share/xray /var/log/xray
+ln -sfn /usr/local/etc/xray /etc/xray
 
-# ---------- BUKA SEMUA PORT (iptables ACCEPT, persist) ----------
-apt-get install -y debconf-utils iptables iptables-persistent netfilter-persistent nftables
+# ---------- BUKA SEMUA PORT ----------
+apt-get install -y debconf-utils iptables iptables-persistent netfilter-persistent nftables || true
 echo 'iptables-persistent iptables-persistent/autosave_v4 boolean true' | debconf-set-selections
 echo 'iptables-persistent iptables-persistent/autosave_v6 boolean true' | debconf-set-selections
 
-# Flush iptables v4/v6 & set default policy ACCEPT
 iptables -P INPUT ACCEPT || true; iptables -P FORWARD ACCEPT || true; iptables -P OUTPUT ACCEPT || true
 iptables -F || true; iptables -X || true; iptables -t nat -F || true; iptables -t mangle -F || true
 ip6tables -P INPUT ACCEPT || true; ip6tables -P FORWARD ACCEPT || true; ip6tables -P OUTPUT ACCEPT || true
 ip6tables -F || true; ip6tables -X || true; ip6tables -t nat -F || true; ip6tables -t mangle -F || true
 
-# Simpan rules kosong (ACCEPT semua) agar persisten
 install -d /etc/iptables
-cat >/etc/iptables/rules.v4 <<'V4'
+cat >/etc/iptables/rules.v4 <<V4
 *filter
 :INPUT ACCEPT [0:0]
 :FORWARD ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 COMMIT
 V4
-cat >/etc/iptables/rules.v6 <<'V6'
+cat >/etc/iptables/rules.v6 <<V6
 *filter
 :INPUT ACCEPT [0:0]
 :FORWARD ACCEPT [0:0]
@@ -143,20 +145,19 @@ ip6tables-restore < /etc/iptables/rules.v6 || true
 systemctl enable netfilter-persistent || true
 netfilter-persistent save || true
 
-# Nonaktifkan nftables & UFW
 systemctl disable --now nftables || true
-apt-get purge -y ufw || true  # kalau ada
-# ---------- END buka semua port ----------
+apt-get purge -y ufw || true
+# ---------- END open ports ----------
 
-# Pasang GRUB non-interaktif
+# GRUB non-interaktif
 : "\${DISK_DEV:?}"
 grub-install "${DISK_DEV}"
 update-initramfs -u
 update-grub
 CHROOT
 
-# ---------- Rsync root baru ke / (2-pass, tahan banting) ----------
-echo "📝 Exclude untuk rsync…"
+# ---------- Rsync root baru ke / (2-pass) ----------
+echo "📝 Exclude rsync…"
 cat >/root/rsync-exclude.txt <<'EOF'
 /dev/*
 /proc/*
@@ -169,7 +170,7 @@ cat >/root/rsync-exclude.txt <<'EOF'
 /swapfile
 EOF
 
-echo "📦 Sync PASS-1 (dengan xattrs/ACL)…"
+echo "📦 Sync PASS-1…"
 set +e
 rsync -aAXH --numeric-ids --delete --one-file-system --super \
   --info=progress2 \
@@ -178,7 +179,7 @@ rsync -aAXH --numeric-ids --delete --one-file-system --super \
 RC=$?
 set -e
 if [ "$RC" -ne 0 ]; then
-  echo "⚠️ rsync PASS-1 error ($RC). Jalankan PASS-2 fallback…"
+  echo "⚠️ PASS-1 error ($RC). PASS-2 fallback…"
   rsync -aH --numeric-ids --delete --one-file-system --super \
     --omit-dir-times --no-inc-recursive \
     --info=progress2 \
