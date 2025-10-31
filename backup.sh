@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==========================================
-# AUTO BACKUP + TELEGRAM NOTIFY (No Email)
+# AUTO BACKUP + TELEGRAM NOTIFY
 # BY KHOIRUL AMIR
 
 # === CONFIG TELEGRAM ===
 BOT_TOKEN="8379519489:AAE6YLcEi9ilkkQmtXHZWM_WYhd4m2mDEJw"
 CHAT_ID="5376506914"
-export TIME="10"
-export URL="https://api.telegram.org/bot$BOT_TOKEN"
+TIME="10"
+URL="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
 
 # === INFO VPS ===
 IP=$(curl -sS ipv4.icanhazip.com)
@@ -34,7 +34,6 @@ zip -r $IP-$date.zip backup > /dev/null 2>&1
 # === UPLOAD KE GOOGLE DRIVE ===
 rclone copy /root/$IP-$date.zip dr:backup/ --progress
 url=$(rclone link "dr:backup/$IP-$date.zip")
-
 id=$(echo "$url" | grep -o '[-_a-zA-Z0-9]\{25,\}')
 link="https://drive.google.com/u/4/uc?id=${id}&export=download"
 
@@ -53,36 +52,14 @@ Backup dibuat otomatis setiap hari.
 BY BOT : @Kamirr21
 "
 
-# === KIRIM SEMUA PESAN SEBAGAI FILE ===
-echo "$TEXT" > /root/backup_log.txt
-curl -s -F chat_id=$CHAT_ID -F document=@/root/backup_log.txt $URL/sendDocument >/dev/null
-rm -f /root/backup_log.txt
+# === KIRIM PESAN BIASA KE TELEGRAM ===
+curl -s --max-time $TIME \
+     --data-urlencode "text=$TEXT" \
+     -d "chat_id=$CHAT_ID&parse_mode=HTML&disable_web_page_preview=1" \
+     $URL >/dev/null
 
 # === HAPUS FILE SEMENTARA ===
 rm -rf /root/backup
 rm -f /root/$IP-$date.zip
 
-echo "✅ Backup harian selesai dan terkirim ke Telegram!"
-# === KIRIM NOTIF TELEGRAM ===
-TEXT="
-<code>◇━━━━━━━━━━━━━━◇</code>
-<b>⚠️ BACKUP OTOMATIS ⚠️</b>
-<b>Detail Backup VPS</b>
-<code>◇━━━━━━━━━━━━━━◇</code>
-<b>IP VPS :</b> <code>${IP}</code>
-<b>DOMAIN :</b> <code>${domain}</code>
-<b>Tanggal :</b> <code>${date}</code>
-<code>◇━━━━━━━━━━━━━━◇</code>
-<b>Link Backup :</b> ${link}
-<code>◇━━━━━━━━━━━━━━◇</code>
-<code>Backup dibuat otomatis setiap hari.</code>
-<code>BY BOT : @Kamirr21</code>
-"
-
-curl -s --max-time $TIME -d "chat_id=$CHAT_ID&disable_web_page_preview=1&text=$TEXT&parse_mode=html" \
-https://api.telegram.org/bot$BOT_TOKEN/sendMessage >/dev/null
-
-rm -rf /root/backup
-rm -f /root/$IP-$date.zip
-
-echo "✅ Backup harian selesai dan terkirim ke Telegram!"
+echo "✅ Backup harian selesai dan notifikasi terkirim ke Telegram!"
