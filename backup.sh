@@ -7,12 +7,14 @@
 BOT_TOKEN="8379519489:AAE6YLcEi9ilkkQmtXHZWM_WYhd4m2mDEJw"
 CHAT_ID="5376506914"
 export TIME="10"
+export URL="https://api.telegram.org/bot$BOT_TOKEN"
 
 # === INFO VPS ===
 IP=$(curl -sS ipv4.icanhazip.com)
 domain=$(cat /etc/xray/domain 2>/dev/null)
 date=$(date +"%Y-%m-%d")
 
+# === PROSES BACKUP ===
 echo "Proses backup sedang berlangsung..."
 rm -rf /root/backup
 mkdir -p /root/backup
@@ -30,11 +32,47 @@ cd /root
 zip -r $IP-$date.zip backup > /dev/null 2>&1
 
 # === UPLOAD KE GOOGLE DRIVE ===
-rclone copy /root/$IP-$date.zip dr:backup/ > /dev/null 2>&1
-url=$(rclone link dr:backup/$IP-$date.zip)
-id=$(echo $url | grep '^https' | cut -d'=' -f2)
+rclone copy /root/$IP-$date.zip dr:backup/ --progress
+url=$(rclone link "dr:backup/$IP-$date.zip")
+
+id=$(echo "$url" | grep -o '[-_a-zA-Z0-9]\{25,\}')
 link="https://drive.google.com/u/4/uc?id=${id}&export=download"
 
+# === SIAPKAN PESAN ===
+TEXT="◇━━━━━━━━━━━━━━◇
+⚠️ BACKUP OTOMATIS ⚠️
+Detail Backup VPS
+◇━━━━━━━━━━━━━━◇
+IP VPS  : ${IP}
+DOMAIN  : ${domain}
+Tanggal : ${date}
+◇━━━━━━━━━━━━━━◇
+Link Backup : ${link}
+◇━━━━━━━━━━━━━━◇
+Backup dibuat otomatis setiap hari.
+BY BOT : @Kamirr21
+"
+
+# === KIRIM PESAN KE TELEGRAM ===
+# Jika teks panjang (>3000 karakter) kirim sebagai file, jika tidak kirim sebagai pesan biasa
+if [ ${#TEXT} -gt 3000 ]; then
+    # Simpan ke file sementara
+    echo "$TEXT" > /root/backup_log.txt
+    curl -s -F chat_id=$CHAT_ID -F document=@/root/backup_log.txt $URL/sendDocument >/dev/null
+    rm -f /root/backup_log.txt
+else
+    # Kirim sebagai pesan biasa (emoji tetap aman)
+    curl -s --max-time $TIME \
+        --data-urlencode "text=$TEXT" \
+        -d "chat_id=$CHAT_ID&disable_web_page_preview=1&parse_mode=HTML" \
+        $URL/sendMessage >/dev/null
+fi
+
+# === HAPUS FILE SEMENTARA ===
+rm -rf /root/backup
+rm -f /root/$IP-$date.zip
+
+echo "✅ Backup harian selesai dan terkirim ke Telegram!"
 # === KIRIM NOTIF TELEGRAM ===
 TEXT="
 <code>◇━━━━━━━━━━━━━━◇</code>
