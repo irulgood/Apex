@@ -53,20 +53,10 @@ Backup dibuat otomatis setiap hari.
 BY BOT : @Kamirr21
 "
 
-# === KIRIM PESAN KE TELEGRAM ===
-# Jika teks panjang (>3000 karakter) kirim sebagai file, jika tidak kirim sebagai pesan biasa
-if [ ${#TEXT} -gt 3000 ]; then
-    # Simpan ke file sementara
-    echo "$TEXT" > /root/backup_log.txt
-    curl -s -F chat_id=$CHAT_ID -F document=@/root/backup_log.txt $URL/sendDocument >/dev/null
-    rm -f /root/backup_log.txt
-else
-    # Kirim sebagai pesan biasa (emoji tetap aman)
-    curl -s --max-time $TIME \
-        --data-urlencode "text=$TEXT" \
-        -d "chat_id=$CHAT_ID&disable_web_page_preview=1&parse_mode=HTML" \
-        $URL/sendMessage >/dev/null
-fi
+# === KIRIM SEMUA PESAN SEBAGAI FILE ===
+echo "$TEXT" > /root/backup_log.txt
+curl -s -F chat_id=$CHAT_ID -F document=@/root/backup_log.txt $URL/sendDocument >/dev/null
+rm -f /root/backup_log.txt
 
 # === HAPUS FILE SEMENTARA ===
 rm -rf /root/backup
