@@ -6,7 +6,7 @@
 DEST="/var/www/html"
 GITHUB_RAW="https://raw.githubusercontent.com/irulgood/Apex/ZX"   # Repositori kamu
 FILES=("search.html" "list_templates.php")
-PHP_VERSION="8.1"   # Ganti sesuai versi PHP yang kamu pakai (cek: ls /run/php/)
+PHP_VERSION="7.4"   # Ganti sesuai versi PHP yang kamu pakai (cek: ls /run/php/)
 
 echo "=============================================="
 echo "🚀  SETUP PANEL & PHP FOR NGINX PORT 81"
