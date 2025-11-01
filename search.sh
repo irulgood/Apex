@@ -9,7 +9,7 @@ DEST="/var/www/html"
 
 # URL file GitHub RAW
 # Ganti dengan link raw GitHub kamu
-GITHUB_RAW="https://raw.githubusercontent.com/USERNAME/REPO/main"
+GITHUB_RAW="https://raw.githubusercontent.com/irulgood/Apex/ZX"
 
 # Daftar file yang mau diambil
 FILES=("search.html" "list_templates.php")
