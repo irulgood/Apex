@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IRUL TUN Account Browser (API)</title>
+<style>
+body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:18px auto;max-width:900px;padding:12px;background:#f6f7fb}
+h1{text-align:center}
+select,input,button{padding:10px;border-radius:8px;border:1px solid #ccc;font-size:15px}
+button{background:#007bff;color:white;border:none;cursor:pointer;font-weight:bold}
+button:hover{background:#0069d9}
+.row{display:flex;gap:8px;align-items:center}
+.list{margin-top:14px;background:#fff;padding:8px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);max-height:400px;overflow:auto}
+.file{padding:8px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center}
+.file:hover{background:#eef7ff}
+.small{font-size:13px;color:#666}
+pre{white-space:pre-wrap;background:#fff;border:1px solid #ddd;padding:12px;border-radius:8px;margin-top:15px;display:none}
+</style>
+</head>
+<body>
+<h1>📂 IRUL TUN Account Browser</h1>
+
+<div>
+  <label>🌐 Pilih Server:</label>
+  <select id="server">
+    <option value="https://panel.irul-tun.my.id:81">Panel 1</option>
+    <option value="https://panel-2.irul-tun.my.id:81">Panel 2</option>
+    <option value="https://panel-3.irul-tun.my.id:81">Panel 3</option>
+    <option value="https://cloud.irul-tun.my.id:81">Cloud</option>
+  </select>
+  <button id="load">🔄 Muat Daftar Akun</button>
+</div>
+
+<div style="margin-top:10px">
+  <label>🔍 Cari nama akun:</label>
+  <input id="search" type="text" placeholder="ketik sebagian nama akun (contoh: arfan)">
+</div>
+
+<div class="list" id="fileList"></div>
+
+<pre id="out"></pre>
+
+<script>
+const fileList = document.getElementById('fileList');
+const search = document.getElementById('search');
+const out = document.getElementById('out');
+let data = [];
+
+async function loadFiles() {
+  const server = document.getElementById('server').value;
+  fileList.innerHTML = "⏳ Memuat...";
+  out.style.display = "none";
+  try {
+    const r = await fetch(server + '/list_templates.php');
+    if (!r.ok) throw new Error('Gagal load data');
+    const json = await r.json();
+    data = json.files || [];
+    renderList();
+  } catch (e) {
+    fileList.innerHTML = "❌ " + e.message;
+  }
+}
+
+function renderList() {
+  const q = search.value.trim().toLowerCase();
+  const filtered = data.filter(f => f.file.toLowerCase().includes(q));
+  if (!filtered.length) {
+    fileList.innerHTML = "<p class='small'>Tidak ada hasil.</p>";
+    return;
+  }
+  fileList.innerHTML = filtered.map(f => `
+    <div class="file">
+      <div>
+        <b>${f.file}</b><br>
+        <span class="small">${f.type || '-'} | ${f.modified}</span>
+      </div>
+      <div>
+        <button onclick="openFile('${f.file}')">🌎 Buka</button>
+        <button onclick="previewFile('${f.file}')">👁️ Preview</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function previewFile(file) {
+  const server = document.getElementById('server').value;
+  out.style.display = "block";
+  out.textContent = "⏳ Memuat isi akun...";
+  try {
+    const r = await fetch(server + '/list_templates.php?file=' + encodeURIComponent(file));
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    out.textContent = j.content;
+  } catch(e) {
+    out.textContent = "❌ " + e.message;
+  }
+}
+
+function openFile(file) {
+  const server = document.getElementById('server').value;
+  window.open(server + '/' + file, '_blank');
+}
+
+search.addEventListener('input', renderList);
+document.getElementById('load').addEventListener('click', loadFiles);
+</script>
+</body>
+</html>
