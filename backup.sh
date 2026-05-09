@@ -8,6 +8,7 @@ BOT_TOKEN="8300633089:AAG37Nd2bf_65SD_tItsJypQ2gDGejc5yKc"
 CHAT_ID="5376506914"
 TIME="10"
 URL="https://api.telegram.org/bot$BOT_TOKEN/sendMessage"
+URL_DOC="https://api.telegram.org/bot$BOT_TOKEN/sendDocument"
 
 # === INFO VPS ===
 IP=$(curl -sS ipv4.icanhazip.com)
@@ -57,6 +58,13 @@ curl -s --max-time $TIME \
      --data-urlencode "text=$TEXT" \
      -d "chat_id=$CHAT_ID&parse_mode=HTML&disable_web_page_preview=1" \
      $URL >/dev/null
+
+# === KIRIM FILE BACKUP KE TELEGRAM ===
+curl -s --max-time 120 \
+     -F "chat_id=$CHAT_ID" \
+     -F "document=@/root/$IP-$date.zip" \
+     -F "caption=File Backup VPS ${IP} - ${date}" \
+     "$URL_DOC" >/dev/null
 
 # === HAPUS FILE SEMENTARA ===
 rm -rf /root/backup
